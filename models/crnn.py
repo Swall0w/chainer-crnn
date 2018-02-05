@@ -22,6 +22,24 @@ class LeakyRelu(object):
         return F.leaky_relu(x, *self.args)
 
 
+class BidirectionalLSTM(chainer.Chain):
+    def __init__(self, nIn, nHidden, nOut):
+        super(BidirectionalLSTM, self).__init__()
+        self.bi_lstm = L.NStepBiLSTM(n_layers=nHidden, in_size=nIn, out_size=nOut, dropout=.0)
+        self.embedding = L.Linear(nHidden*2, nOut)
+
+    def __call__(self, x):
+        _, _, recurrent = self.bi_lstm(hx=None, cx=None, xs=[x])
+        print(recurrent)
+        for index, y in enumerate(recurrent):
+            print(index, '  ', y.data.shape)
+        T, b, h = recurrent.data.shape
+        t_rec = F.reshape(recurrent, (T * b, h))
+        output = self.embedding(t_rec)
+        output = F.reshape(output, (T, b, -1))
+        return output
+
+
 class CRNN(chainer.Chain):
     def __init__(self, imgH, nc, nclass, nh, n_rnn=2, leakyRelu=False):
         super(CRNN, self).__init__()
@@ -64,10 +82,8 @@ class CRNN(chainer.Chain):
         with self.init_scope():
             self.cnn = Sequential(cnn)
             self.rnn = Sequential(
-                # input_size=512, hidden_size=nh, num_layers=nh
-                L.NStepBiLSTM(n_layers=nh, in_size=512, out_size=nh, dropout=.0),
-                # input_size=nh, hidden_size=nh, num_layers=nclass
-                L.NStepBiLSTM(n_layers=nclass, in_size=nh, out_size=nh, dropout=.0),
+                BidirectionalLSTM(512, nh, nh),
+                BidirectionalLSTM(nh, nh, nclass)
             )
 
     def __call__(self, x):
