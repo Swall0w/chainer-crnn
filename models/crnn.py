@@ -2,7 +2,7 @@ import chainer
 import chainer.functions as F
 import chainer.links as L
 
-from sequential import Sequential
+from .sequential import Sequential
 from collections import OrderedDict
 
 
@@ -104,3 +104,7 @@ if __name__ == '__main__':
     print('image shape: ',img.data.shape)
     pred = crnn(img)
     print('pred shape: ', pred.data.shape)
+    preds = F.argmax(pred, axis=2)
+    print('pred max shape: ', preds.data.shape)
+    preds = F.transpose(preds, axes=(1, 0)).reshape(-1)
+    print('pred reshape: ', preds.data.shape)
