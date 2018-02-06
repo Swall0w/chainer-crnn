@@ -11,8 +11,8 @@ import models.crnn as crnn
 import chainer
 import  chainer.links as L
 from chainer.dataset import convert
-from chainer import serializers
-from chainer import Variable
+from chainer import serializers, Variable, training
+from chainer.training import extensions
 import six
 import numpy as np
 from PIL import Image
@@ -26,6 +26,8 @@ def arg():
 #        help='path to dataset')
     parser.add_argument('--workers', type=int, default=2,
         help='number of data loading workers')
+    parser.add_argument('--frequency', type=int, default=-1,
+        help='Frequency of taking a snapshot')
     parser.add_argument('--batchsize', '-b',type=int, default=64,
         help='input batch size')
     parser.add_argument('--lexicon', default='dataset/90kDICT32px/lexicon.txt',
@@ -124,9 +126,9 @@ class TextImageDataset(chainer.dataset.DatasetMixin):
         if len(image.shape) == 2:
             image = image[np.newaxis, :]
 
-#        text = label
         text = self._lexicon[int(label)]
-        return image, text, full_path
+        return image, text
+
 
 # loss = F.connectionist_temporal_classification(y_batch, t_batch, BLANK, x_length_batch, t_length_batch)
 
@@ -153,15 +155,19 @@ def main():
         pairs_path='dataset/90kDICT32px/1ktrain.txt',
         lexicon=args.lexicon)
 
+    test = TextImageDataset(
+        pairs_path='dataset/90kDICT32px/1ktest.txt',
+        lexicon=args.lexicon)
+
     for img in train[0:10]:
-        print(img[0].shape, img[1], img[2])
+        print(img[0].shape, img[1])
 
     train_iter = chainer.iterators.SerialIterator(train, args.batchsize)
     test_iter = chainer.iterators.SerialIterator(test, args.batchsize,
         repeat=False, shuffle=False)
 
     # Set up a trainer
-    updater = training.updaters.StandardUpdater(
+    updater = training.StandardUpdater(
         train_iter, optimizer, device=args.gpu)
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), out=args.out)
 
