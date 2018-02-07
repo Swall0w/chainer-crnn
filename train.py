@@ -10,12 +10,16 @@ import models.crnn as crnn
 
 import chainer
 import  chainer.links as L
+import  chainer.functions as F
 from chainer.dataset import convert
 from chainer import serializers, Variable, training
 from chainer.training import extensions
 import six
 import numpy as np
 from PIL import Image
+from chainer.dataset import iterator as itr_module
+from dataset import resizeNormalize
+from skimage.transform import resize as imresize
 
 
 def arg():
@@ -131,9 +135,15 @@ class TextImageDataset(chainer.dataset.DatasetMixin):
 
 
 # loss = F.connectionist_temporal_classification(y_batch, t_batch, BLANK, x_length_batch, t_length_batch)
-def yolo_converter(batch, device=None):
+
+
+
+def converter(batch, device=None, imgH=32, imgW=100, keep_ratio=False, min_ratio=1):
     if len(batch) == 0:
         raise ValueError('batch is empty')
+
+    if keep_ratio:
+        pass
 
     batch = format_image_size.batch(batch)
 
@@ -145,10 +155,87 @@ def yolo_converter(batch, device=None):
         return x, label
 
 
+class AlignConverter(object):
+    def __init__(self, imgH=32, imgW=100, keep_ratio=False, min_ratio=1):
+        self.imgH = imgH
+        self.imgW = imgW
+        self.keep_ratio = keep_ratio
+        self.min_ratio = min_ratio
+
+    def __call__(self, batch, device=None):
+        if len(batch) == 0:
+            raise ValueError('batch is empty')
+        batchlist = batch
+        imgH = self.imgH
+        imgW = self.imgW
+        if self.keep_ratio:
+            ratios = []
+            for item in batchlist:
+                w, h = item[0].shape
+                ratios.append(w / float(h))
+            ratios.sort()
+            max_ratio = ratios[-1]
+            imgW = int(np.float(max_ratio * imgH))
+            imgW = max(imgH * self.min_ratio, imgW)
+
+#        transform = resizeNormalize((imgW, imgH))
+#        batch = format_image_size.batch(batch)
+        print(batchlist)
+        print(len(batchlist))
+        items = []
+        for item in batchlist:
+            print(item[0].shape, item[1])
+
+            transpose_image = np.transpose(item[0].data, (1, 2, 0))
+            resized_image = imresize(transpose_image,
+                                     (imgH, imgW),
+                                     mode='reflect')
+            resized_image = resized_image.transpose(2, 0, 1).astype(np.float32)
+            print('resized: ', resized_image.shape)
+            if len(resized_image.shape) == 2:
+                img = img[np.newaxis, :]
+            img = img - 0.5
+            img = img / 0.5
+            items.append(img, item[1])
+
+
+#            image = np.uint8(np.asarray(item[0].data * (256.0 / np.max(item[0].data)).astype(np.float32)))
+#            print(image)
+#            image = Image.fromarray(image)
+#            #print(image)
+#        images = [(transform(item[0]), item[1]) for item in batchlist]
+        images = items
+#        for image in images:
+#            print(image[0].shape, image[1])
+
+        first_elem = batch[0]
+        if isinstance(first_elem, tuple):
+            x = _to_device(device, _concat_arrays([item[0] for item in batch]))
+            x = Variable(x)
+            label = [item[1] for item in batch]
+            return x, label
+
+
+#def batch(batch):
+#    from skimage.transform import resize as imresize
+#    format_size = batch[0][0].shape[1]
+#    format_batch = []
+#
+#    for index, item in enumerate(batch):
+#        original_image = item[0]
+#        transpose_image = np.transpose(original_image, (1, 2, 0))
+#        resized_image = imresize(transpose_image,
+#                                 (format_size, format_size),
+#                                 mode='reflect')
+#        resized_image = resized_image.transpose(2, 0, 1).astype(np.float32)
+#        format_batch.append((resized_image, batch[index][1]))
+#    return format_batch
+
+
 class CRNNUpdater(training.StandardUpdater):
-    def __init__(self, iterator, optimizer, converter=convert.concat_examples,
+    def __init__(self, iterator, optimizer, converter=converter,
             device=None):
-        if isinstance(iterator, iterator_module.Iterator):
+        if isinstance(iterator, itr_module.Iterator):
             iterator = {'main': iterator}
         self._iterators = iterator
 
@@ -160,10 +247,10 @@ class CRNNUpdater(training.StandardUpdater):
             for optimizer in six.itervalues(self._optimizers):
                 optimizer.target.to_gpu(device)
 
-            self.converter = converter
-            self.loss_func = F.connectionist_temporal_classification
-            self.device = device
-            self.iteration = 0
+        self.converter = converter
+        self.loss_func = F.connectionist_temporal_classification
+        self.device = device
+        self.iteration = 0
 
     def update_core(self):
         batch = self._iterators['main'].next()
@@ -206,16 +293,17 @@ def main():
         pairs_path='dataset/90kDICT32px/1ktest.txt',
         lexicon=args.lexicon)
 
-    for img in train[0:10]:
-        print(img[0].shape, img[1])
+#    for img in train[0:10]:
+#        print(img[0].shape, img[1])
 
     train_iter = chainer.iterators.SerialIterator(train, args.batchsize)
     test_iter = chainer.iterators.SerialIterator(test, args.batchsize,
         repeat=False, shuffle=False)
 
+    convert =  AlignConverter(imgH=args.imgH, imgW=args.imgW)
     # Set up a trainer
-    updater = training.StandardUpdater(
-        train_iter, optimizer, device=args.gpu)
+    updater = CRNNUpdater(
+        train_iter, optimizer, converter=convert, device=args.gpu)
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), out=args.out)
 
     # Evaluate the model with the test dataset for each epoch
