@@ -7,6 +7,7 @@ from PIL import Image
 
 import models.crnn as crnn
 import numpy as np
+import skimage.io as skio
 
 
 def main():
@@ -24,12 +25,10 @@ def main():
 
     converter = utils.strLabelConverter(alphabet)
 
-    transformer = dataset.resizeNormalize((100, 32))
-    image = Image.open(img_path).convert('L')
+    transformer = dataset.resizeNormalize((32, 100))
+    image = np.expand_dims(skio.imread(img_path, as_grey=True), axis=0)
     image = transformer(image)
-    print(image.shape)
     image = np.expand_dims(image, axis=0).astype(np.float32)
-    print(image.shape)
     if gpu >= 0:
         image = cuda.to_gpu(image)
     image = Variable(image)

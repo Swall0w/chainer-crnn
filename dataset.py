@@ -11,7 +11,7 @@ import six
 import sys
 from PIL import Image
 import numpy as np
-
+from skimage.transform import resize as imresize
 
 class lmdbDataset(Dataset):
 
@@ -73,11 +73,13 @@ class resizeNormalize(object):
         self.interpolation = interpolation
 
     def __call__(self, img):
-        img = np.asarray(img.resize(self.size, self.interpolation))
+        # image shape should be (ch, h, w) 0 <= pix <= 1
         if len(img.shape) == 2:
             img = img[np.newaxis, :]
-        img = img - 0.5
-        img = img / 0.5
+        img = np.transpose(img, (1, 2, 0))
+        resized_image = imresize(img, self.size, mode='reflect')
+        resized_image = resized_image.transpose(2, 0, 1).astype(np.float32)
+        img = resized_image - 0.5
         return img
 
 
