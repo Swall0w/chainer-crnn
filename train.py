@@ -20,14 +20,13 @@ from PIL import Image
 from chainer.dataset import iterator as itr_module
 from dataset import resizeNormalize
 from skimage.transform import resize as imresize
+import skimage.io as skio
+from chainer.dataset.convert import _concat_arrays
+from chainer.dataset.convert import concat_examples
 
 
 def arg():
     parser = argparse.ArgumentParser()
-#    parser.add_argument('--trainroot', required=True,
-#        help='path to dataset')
-#    parser.add_argument('--valroot', required=True,
-#        help='path to dataset')
     parser.add_argument('--workers', type=int, default=2,
         help='number of data loading workers')
     parser.add_argument('--frequency', type=int, default=-1,
@@ -80,12 +79,10 @@ def arg():
 
 
 def _read_image_as_array(path, dtype):
-    f = Image.open(path).convert('L')
-    try:
-        image = np.asarray(f, dtype=dtype)
-    finally:
-        if hasattr(f, 'close'):
-            f.close()
+    image = skio.imread(path, as_grey=True)
+    image = np.expand_dims(image, axis=0)
+    image = np.asarray(image, dtype=dtype)
+
     return image
 
 
@@ -137,24 +134,6 @@ class TextImageDataset(chainer.dataset.DatasetMixin):
 # loss = F.connectionist_temporal_classification(y_batch, t_batch, BLANK, x_length_batch, t_length_batch)
 
 
-
-def converter(batch, device=None, imgH=32, imgW=100, keep_ratio=False, min_ratio=1):
-    if len(batch) == 0:
-        raise ValueError('batch is empty')
-
-    if keep_ratio:
-        pass
-
-    batch = format_image_size.batch(batch)
-
-    first_elem = batch[0]
-    if isinstance(first_elem, tuple):
-        x = _to_device(device, _concat_arrays([item[0] for item in batch]))
-        x = Variable(x)
-        label = [item[1] for item in batch]
-        return x, label
-
-
 class AlignConverter(object):
     def __init__(self, imgH=32, imgW=100, keep_ratio=False, min_ratio=1):
         self.imgH = imgH
@@ -165,6 +144,7 @@ class AlignConverter(object):
     def __call__(self, batch, device=None):
         if len(batch) == 0:
             raise ValueError('batch is empty')
+
         batchlist = batch
         imgH = self.imgH
         imgW = self.imgW
@@ -178,62 +158,19 @@ class AlignConverter(object):
             imgW = int(np.float(max_ratio * imgH))
             imgW = max(imgH * self.min_ratio, imgW)
 
-#        transform = resizeNormalize((imgW, imgH))
-#        batch = format_image_size.batch(batch)
-        print(batchlist)
-        print(len(batchlist))
+        transform = resizeNormalize((imgW, imgH))
         items = []
         for item in batchlist:
             print(item[0].shape, item[1])
+            img = transform(item[0])
+            print(img.shape)
+            items.append((img, item[1]))
 
-            transpose_image = np.transpose(item[0].data, (1, 2, 0))
-            resized_image = imresize(transpose_image,
-                                     (imgH, imgW),
-                                     mode='reflect')
-            resized_image = resized_image.transpose(2, 0, 1).astype(np.float32)
-            print('resized: ', resized_image.shape)
-            if len(resized_image.shape) == 2:
-                img = img[np.newaxis, :]
-            img = img - 0.5
-            img = img / 0.5
-            items.append(img, item[1])
-
-
-#            image = np.uint8(np.asarray(item[0].data * (256.0 / np.max(item[0].data)).astype(np.float32)))
-#            print(image)
-#            image = Image.fromarray(image)
-#            #print(image)
-#        images = [(transform(item[0]), item[1]) for item in batchlist]
-        images = items
-#        for image in images:
-#            print(image[0].shape, image[1])
-
-        first_elem = batch[0]
-        if isinstance(first_elem, tuple):
-            x = _to_device(device, _concat_arrays([item[0] for item in batch]))
-            x = Variable(x)
-            label = [item[1] for item in batch]
-            return x, label
-
-
-#def batch(batch):
-#    from skimage.transform import resize as imresize
-#    format_size = batch[0][0].shape[1]
-#    format_batch = []
-#
-#    for index, item in enumerate(batch):
-#        original_image = item[0]
-#        transpose_image = np.transpose(original_image, (1, 2, 0))
-#        resized_image = imresize(transpose_image,
-#                                 (format_size, format_size),
-#                                 mode='reflect')
-#        resized_image = resized_image.transpose(2, 0, 1).astype(np.float32)
-#        format_batch.append((resized_image, batch[index][1]))
-#    return format_batch
+        return concat_examples(items, device)
 
 
 class CRNNUpdater(training.StandardUpdater):
-    def __init__(self, iterator, optimizer, converter=converter,
+    def __init__(self, iterator, optimizer, converter,
             device=None):
         if isinstance(iterator, itr_module.Iterator):
             iterator = {'main': iterator}
