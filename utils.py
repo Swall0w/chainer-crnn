@@ -4,6 +4,8 @@
 import chainer
 from chainer import Variable
 import collections
+import torch
+import numpy as np
 
 
 class strLabelConverter(object):
@@ -48,7 +50,7 @@ class strLabelConverter(object):
             length = [len(s) for s in text]
             text = ''.join(text)
             text, _ = self.encode(text)
-        return (torch.IntTensor(text), torch.IntTensor(length))
+        return (Variable(np.array(text).astype(np.int8)), Variable(np.array(length).astype(np.int8)))
 
     def decode(self, t, length, raw=False):
         """Decode encoded texts back into strs.

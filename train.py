@@ -4,10 +4,7 @@ import random
 import os
 import utils
 import dataset
-
 import models.crnn as crnn
-
-
 import chainer
 import  chainer.links as L
 import  chainer.functions as F
@@ -131,15 +128,13 @@ class TextImageDataset(chainer.dataset.DatasetMixin):
         return image, text
 
 
-# loss = F.connectionist_temporal_classification(y_batch, t_batch, BLANK, x_length_batch, t_length_batch)
-
-
 class AlignConverter(object):
-    def __init__(self, imgH=32, imgW=100, keep_ratio=False, min_ratio=1):
+    def __init__(self, alphabet, imgH=32, imgW=100, keep_ratio=False, min_ratio=1):
         self.imgH = imgH
         self.imgW = imgW
         self.keep_ratio = keep_ratio
         self.min_ratio = min_ratio
+        self.textconverter = utils.strLabelConverter(alphabet)
 
     def __call__(self, batch, device=None):
         if len(batch) == 0:
@@ -161,12 +156,13 @@ class AlignConverter(object):
         transform = resizeNormalize((imgW, imgH))
         items = []
         for item in batchlist:
-            print(item[0].shape, item[1])
             img = transform(item[0])
-            print(img.shape)
-            items.append((img, item[1]))
+            t, l = self.textconverter.encode(item[1])
+            print(img.shape, item[1], t, l)
+            items.append((img, t))
 
-        return concat_examples(items, device)
+#        return concat_examples(items, device, )
+        return variable_sequence_convert(items, device)
 
 
 class CRNNUpdater(training.StandardUpdater):
@@ -193,15 +189,47 @@ class CRNNUpdater(training.StandardUpdater):
         batch = self._iterators['main'].next()
         in_arrays = self.converter(batch, self.device)
 
+        print('batch', type(in_arrays[0]))
         optimizer = self._optimizers['main']
         loss_func = self.loss_func or optimizer.target
 
         if isinstance(in_arrays, tuple):
-            optimizer.update(loss_func, *in_arrays)
+            in_vars = tuple(Variable(x) for x in in_arrays)
+            in_arrays = in_vars
+        print(in_arrays)
+        print(type(in_arrays))
+        if isinstance(in_arrays, tuple):
+            optimizer.update(loss_func, *(*in_arrays, 0))
         elif isinstance(in_arrays, dict):
             optimizer.update(loss_func, **in_arrays)
         else:
             optimizer.update(loss_func, in_arrays)
+
+
+def variable_sequence_convert(batch, device):
+    if device is None:
+        def to_device(x):
+            return x
+    elif device < 0:
+        to_device = chainer.cuda.to_cpu
+    else:
+        def to_device(x):
+            return chainer.cuda.to_gpu(x, device, chainer.cuda.Stream.null)
+
+    def to_device_batch(batch):
+        if device is None:
+            return batch
+        elif device < 0:
+            return [to_device(x) for x in batch]
+        else:
+            xp = chainer.cuda.cupy.get_array_module(*batch)
+            concat = xp.concatenate(batch, axis=0)
+            sections = np.cumsum([len(x) for x in batch[:-1]], dtype='i')
+            concat_dev = to_device(concat)
+            batch_dev = chainer.cuda.cupy.split(concat_dev, sections)
+            return batch_dev
+
+    return tuple([to_device_batch([x for x, _ in batch]), to_device_batch([y for _, y in batch])])
 
 
 def main():
@@ -209,14 +237,12 @@ def main():
     if not os.path.isdir(args.out):
         os.system('mkdir {0}'.format(args.out))
 
-
     nc = 1
     nclass = len(args.alphabet) + 1
     model = crnn.CRNN(args.imgH, nc, nclass, args.nh)
     if args.gpu >= 0:
         chainer.cuda.get_device(args.gpu).use()
         model.to_gpu()
-
 
     # Setup an optimizer
     optimizer = chainer.optimizers.Adam()
@@ -230,14 +256,11 @@ def main():
         pairs_path='dataset/90kDICT32px/1ktest.txt',
         lexicon=args.lexicon)
 
-#    for img in train[0:10]:
-#        print(img[0].shape, img[1])
-
     train_iter = chainer.iterators.SerialIterator(train, args.batchsize)
     test_iter = chainer.iterators.SerialIterator(test, args.batchsize,
         repeat=False, shuffle=False)
 
-    convert =  AlignConverter(imgH=args.imgH, imgW=args.imgW)
+    convert =  AlignConverter(alphabet=args.alphabet, imgH=args.imgH, imgW=args.imgW)
     # Set up a trainer
     updater = CRNNUpdater(
         train_iter, optimizer, converter=convert, device=args.gpu)
@@ -259,160 +282,7 @@ def main():
 
     trainer.extend(extensions.ProgressBar())
     trainer.run()
-#    train_dataset = dataset.lmdbDataset(root=args.trainroot)
-#    assert train_dataset
-#    if not args.random_sample:
-#        sampler = dataset.randomSequentialSampler(train_dataset, args.batchsize)
-#    else:
-#        sampler = None
-#    train_loader = torch.utils.data.DataLoader(
-#        train_dataset, batch_size=args.batchsize,
-#        shuffle=True, sampler=sampler,
-#        num_workers=int(args.workers),
-#        collate_fn=dataset.alignCollate(imgH=args.imgH, imgW=args.imgW, keep_ratio=args.keep_ratio))
-#    test_dataset = dataset.lmdbDataset(
-#        root=args.valroot, transform=dataset.resizeNormalize((100, 32)))
-#
-#    nclass = len(args.alphabet) + 1
-#    nc = 1
-#
-#    converter = utils.strLabelConverter(args.alphabet)
-#    criterion = CTCLoss()
-#
-#
-## custom weights initialization called on crnn
-#    def weights_init(m):
-#        classname = m.__class__.__name__
-#        if classname.find('Conv') != -1:
-#            m.weight.data.normal_(0.0, 0.02)
-#        elif classname.find('BatchNorm') != -1:
-#            m.weight.data.normal_(1.0, 0.02)
-#            m.bias.data.fill_(0)
-#
-#
-#    crnn = crnn.CRNN(args.imgH, nc, nclass, args.nh)
-#    crnn.apply(weights_init)
-#    if args.crnn != '':
-#        print('loading pretrained model from %s' % args.crnn)
-#        crnn.load_state_dict(torch.load(args.crnn))
-#    print(crnn)
-#
-#    image = torch.FloatTensor(args.batchsize, 3, args.imgH, args.imgH)
-#    text = torch.IntTensor(args.batchsize * 5)
-#    length = torch.IntTensor(args.batchsize)
-#
-#    if args.cuda:
-#        crnn.cuda()
-#        crnn = torch.nn.DataParallel(crnn, device_ids=range(args.ngpu))
-#        image = image.cuda()
-#        criterion = criterion.cuda()
-#
-#    image = Variable(image)
-#    text = Variable(text)
-#    length = Variable(length)
-#
-## loss averager
-#    loss_avg = utils.averager()
-#
-## setup optimizer
-#    if args.adam:
-#        optimizer = optim.Adam(crnn.parameters(), lr=args.lr,
-#                               betas=(args.beta1, 0.999))
-#    elif args.adadelta:
-#        optimizer = optim.Adadelta(crnn.parameters(), lr=args.lr)
-#    else:
-#        optimizer = optim.RMSprop(crnn.parameters(), lr=args.lr)
-#
-#
-#    def val(net, dataset, criterion, max_iter=100):
-#        print('Start val')
-#
-#        for p in crnn.parameters():
-#            p.requires_grad = False
-#
-#        net.eval()
-#        data_loader = torch.utils.data.DataLoader(
-#            dataset, shuffle=True, batch_size=args.batchsize, num_workers=int(args.workers))
-#        val_iter = iter(data_loader)
-#
-#        i = 0
-#        n_correct = 0
-#        loss_avg = utils.averager()
-#
-#        max_iter = min(max_iter, len(data_loader))
-#        for i in range(max_iter):
-#            data = val_iter.next()
-#            i += 1
-#            cpu_images, cpu_texts = data
-#            batch_size = cpu_images.size(0)
-#            utils.loadData(image, cpu_images)
-#            t, l = converter.encode(cpu_texts)
-#            utils.loadData(text, t)
-#            utils.loadData(length, l)
-#
-#            preds = crnn(image)
-#            preds_size = Variable(torch.IntTensor([preds.size(0)] * batch_size))
-#            cost = criterion(preds, text, preds_size, length) / batch_size
-#            loss_avg.add(cost)
-#
-#            _, preds = preds.max(2)
-#            preds = preds.squeeze(2)
-#            preds = preds.transpose(1, 0).contiguous().view(-1)
-#            sim_preds = converter.decode(preds.data, preds_size.data, raw=False)
-#            for pred, target in zip(sim_preds, cpu_texts):
-#                if pred == target.lower():
-#                    n_correct += 1
-#
-#        raw_preds = converter.decode(preds.data, preds_size.data, raw=True)[:args.n_test_disp]
-#        for raw_pred, pred, gt in zip(raw_preds, sim_preds, cpu_texts):
-#            print('%-20s => %-20s, gt: %-20s' % (raw_pred, pred, gt))
-#
-#        accuracy = n_correct / float(max_iter * args.batchsize)
-#        print('Test loss: %f, accuray: %f' % (loss_avg.val(), accuracy))
-#
-#
-#    def trainBatch(net, criterion, optimizer):
-#        data = train_iter.next()
-#        cpu_images, cpu_texts = data
-#        batch_size = cpu_images.size(0)
-#        utils.loadData(image, cpu_images)
-#        t, l = converter.encode(cpu_texts)
-#        utils.loadData(text, t)
-#        utils.loadData(length, l)
-#
-#        preds = crnn(image)
-#        preds_size = Variable(torch.IntTensor([preds.size(0)] * batch_size))
-#        cost = criterion(preds, text, preds_size, length) / batch_size
-#        crnn.zero_grad()
-#        cost.backward()
-#        optimizer.step()
-#        return cost
-#
-#
-#    for epoch in range(args.epoch):
-#        train_iter = iter(train_loader)
-#        i = 0
-#        while i < len(train_loader):
-#            for p in crnn.parameters():
-#                p.requires_grad = True
-#            crnn.train()
-#
-#            cost = trainBatch(crnn, criterion, optimizer)
-#            loss_avg.add(cost)
-#            i += 1
-#
-#            if i % args.displayInterval == 0:
-#                print('[%d/%d][%d/%d] Loss: %f' %
-#                      (epoch, args.epoch, i, len(train_loader), loss_avg.val()))
-#                loss_avg.reset()
-#
-#            if i % args.valInterval == 0:
-#                val(crnn, test_dataset, criterion)
-#
-#            # do checkpointing
-#            if i % args.saveInterval == 0:
-#                torch.save(
-#                    crnn.state_dict(), '{0}/netCRNN_{1}_{2}.pth'.format(args.experiment, epoch, i))
-#
+
+
 if __name__ == '__main__':
     main()
