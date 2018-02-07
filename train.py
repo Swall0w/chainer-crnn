@@ -1,7 +1,6 @@
 from __future__ import print_function
 import argparse
 import random
-import os
 import utils
 import dataset
 import models.crnn as crnn
@@ -17,7 +16,6 @@ from PIL import Image
 from chainer.dataset import iterator as itr_module
 from dataset import resizeNormalize
 from skimage.transform import resize as imresize
-import skimage.io as skio
 from chainer.dataset.convert import _concat_arrays
 from chainer.dataset.convert import concat_examples
 
@@ -73,59 +71,6 @@ def arg():
     opt = parser.parse_args()
     print(opt)
     return opt
-
-
-def _read_image_as_array(path, dtype):
-    image = skio.imread(path, as_grey=True)
-    image = np.expand_dims(image, axis=0)
-    image = np.asarray(image, dtype=dtype)
-
-    return image
-
-
-class TextImageDataset(chainer.dataset.DatasetMixin):
-    def __init__(self, pairs_path, lexicon, label_dict=None, dtype=np.float32,
-            label_dtype=np.int32, resize=None, random_step=0):
-        self.path_to_target_txt = '{}/'.format(os.path.split(pairs_path)[0])
-        if isinstance(pairs_path, six.string_types):
-            with open(pairs_path) as pairs_file:
-                pairs = []
-                for i, line in enumerate(pairs_file):
-                    pair = line.strip().split()
-                    if len(pair) != 2:
-                        raise ValueError(
-                                'invalid format at line {} in file {}'.format(
-                                    i, pairs_path))
-                    pairs.append((pair[0], str(pair[1])))
-
-        if isinstance(lexicon, six.string_types):
-            l_names = []
-            with open(lexicon) as lexicon_file:
-                for i, line in enumerate(lexicon_file):
-                    name = line.strip().split()
-                    if len(name) != 1:
-                        raise ValueError('invalid format')
-                    l_names.append(str(*name))
-
-        self._lexicon = l_names
-        self._pairs = pairs
-        self._dtype = dtype
-        self._label_dtype = label_dtype
-        self.resize = resize
-        self.label_dict = label_dict
-
-    def __len__(self):
-        return len(self._pairs)
-
-    def get_example(self, i):
-        img_path, label = self._pairs[i]
-        full_path = os.path.abspath(self.path_to_target_txt + img_path)
-        image = _read_image_as_array(full_path, self._dtype)
-        if len(image.shape) == 2:
-            image = image[np.newaxis, :]
-
-        text = self._lexicon[int(label)]
-        return image, text
 
 
 class AlignConverter(object):
@@ -234,8 +179,8 @@ def variable_sequence_convert(batch, device):
 
 def main():
     args = arg()
-    if not os.path.isdir(args.out):
-        os.system('mkdir {0}'.format(args.out))
+#    if not os.path.isdir(args.out):
+#        os.system('mkdir {0}'.format(args.out))
 
     nc = 1
     nclass = len(args.alphabet) + 1
@@ -248,11 +193,11 @@ def main():
     optimizer = chainer.optimizers.Adam()
     optimizer.setup(model)
 
-    train = TextImageDataset(
+    train = dataset.TextImageDataset(
         pairs_path='dataset/90kDICT32px/1ktrain.txt',
         lexicon=args.lexicon)
 
-    test = TextImageDataset(
+    test = dataset.TextImageDataset(
         pairs_path='dataset/90kDICT32px/1ktest.txt',
         lexicon=args.lexicon)
 
