@@ -12,10 +12,15 @@ import six
 import numpy as np
 from chainer.dataset import iterator as itr_module
 from chainer import reporter
+from chainer import function
 
 
 def arg():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--train', default='dataset/90kDICT32px/1ktrain.txt',
+        type=str, help='path to train file.')
+    parser.add_argument('--test', default='dataset/90kDICT32px/1ktest.txt',
+        type=str, help='path to test file.')
     parser.add_argument('--workers', type=int, default=2,
         help='number of data loading workers')
     parser.add_argument('--frequency', type=int, default=-1,
@@ -113,6 +118,69 @@ class CRNNUpdater(training.StandardUpdater):
         reporter.report({'loss': loss}, self._optimizers['main'].target)
 
 
+class CRNN_Evaluator(extensions.Evaluator):
+    def __init__(self, iterator, model, converter, device=None,
+                 eval_hook=None):
+
+        if isinstance(iterator, itr_module.Iterator):
+            iterator = {'main': iterator}
+        self._iterators = iterator
+        self._targets = {'main': model}
+
+        if device is not None and device >= 0:
+            for target in six.itervalues(self._targets):
+                target.to_gpu(device)
+
+        self.converter = converter
+        self.loss_func = F.connectionist_temporal_classification
+        self.device = device
+        self.iteration = 0
+        self.eval_hook = eval_hook
+
+    def evaluate(self):
+        iterator = self._iterators['main']
+        eval_func = self.loss_func
+        model = self._targets['main']
+
+        if self.eval_hook:
+            self.eval_hook(self)
+
+        if hasattr(iterator, 'reset'):
+            iterator.reset()
+            it = iterator
+        else:
+            it = copy.copy(iterator)
+
+        summary = reporter.DictSummary()
+
+        for batch in it:
+            observation = {}
+            with reporter.report_scope(observation):
+                in_arrays = self.converter(batch, self.device)
+                xs, ts = in_arrays
+
+                xp = model.xp
+                loss_func = self.loss_func
+
+                x = Variable(np.asarray(xs)) # (64, 1, 32, 100)
+                y = model(x) # (26, 64, 37)
+                padded_ts = np.zeros((len(ts), max([len(t) for t in ts])))
+                for index, item in enumerate(ts):
+                    padded_ts[index, :item.shape[0]] = item
+
+                with function.no_backprop_mode():
+                    loss = eval_func([item for item in y],
+                                     xp.asarray(padded_ts).astype(xp.int32),
+                                     0,
+                                     xp.full((len(ts),), 26, dtype=xp.int32),
+                                     xp.asarray([len(t) for t in ts]).astype(xp.int32))
+
+                observation['validation/main/loss'] = loss
+            summary.add(observation)
+
+        return summary.compute_mean()
+
+
 def main():
     args = arg()
 
@@ -128,11 +196,11 @@ def main():
     optimizer.setup(model)
 
     train = dataset.TextImageDataset(
-        pairs_path='dataset/90kDICT32px/1ktrain.txt',
+        pairs_path=args.train,
         lexicon=args.lexicon)
 
     test = dataset.TextImageDataset(
-        pairs_path='dataset/90kDICT32px/1ktest.txt',
+        pairs_path=args.test,
         lexicon=args.lexicon)
 
     train_iter = chainer.iterators.SerialIterator(train, args.batchsize)
@@ -146,7 +214,7 @@ def main():
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), out=args.out)
 
     # Evaluate the model with the test dataset for each epoch
-#    trainer.extend(extensions.Evaluator(test_iter, model, device=args.gpu))
+    trainer.extend(CRNN_Evaluator(test_iter, model, converter=convert, device=args.gpu))
 
     # Take a snapshot for each specified epoch
     frequency = args.epoch if args.frequency == -1 else max(1, args.frequency)
@@ -155,8 +223,7 @@ def main():
     trainer.extend(extensions.LogReport())
 
     trainer.extend(extensions.PrintReport(
-        ['epoch', 'main/loss', 'validation/main/loss', 'main/accuracy',
-         'validation/main/accuracy', 'elapsed_time']
+        ['epoch', 'main/loss', 'validation/main/loss', 'elapsed_time']
          ))
 
     trainer.extend(extensions.ProgressBar())
