@@ -4,7 +4,6 @@
 import chainer
 from chainer import Variable
 import collections
-import torch
 import numpy as np
 
 
@@ -37,8 +36,8 @@ class strLabelConverter(object):
             text (str or list of str): texts to convert.
 
         Returns:
-            torch.IntTensor [length_0 + length_1 + ... length_{n - 1}]: encoded texts.
-            torch.IntTensor [n]: length of each text.
+            numpy array [length_0 + length_1 + ... length_{n - 1}]: encoded texts.
+            numpy array [n]: length of each text.
         """
         if isinstance(text, str):
             text = [
@@ -50,14 +49,14 @@ class strLabelConverter(object):
             length = [len(s) for s in text]
             text = ''.join(text)
             text, _ = self.encode(text)
-        return (Variable(np.array(text).astype(np.int8)), Variable(np.array(length).astype(np.int8)))
+        return (np.array(text).astype(np.int8), np.array(length).astype(np.int8))
 
     def decode(self, t, length, raw=False):
         """Decode encoded texts back into strs.
 
         Args:
-            torch.IntTensor [length_0 + length_1 + ... length_{n - 1}]: encoded texts.
-            torch.IntTensor [n]: length of each text.
+            numpy array [length_0 + length_1 + ... length_{n - 1}]: encoded texts.
+            numpy array [n]: length of each text.
 
         Raises:
             AssertionError: when the texts and its length does not match.
