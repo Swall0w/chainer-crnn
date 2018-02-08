@@ -18,6 +18,7 @@ from dataset import resizeNormalize
 from skimage.transform import resize as imresize
 from chainer.dataset.convert import _concat_arrays
 from chainer.dataset.convert import concat_examples
+from chainer import reporter
 
 
 def arg():
@@ -98,15 +99,14 @@ class AlignConverter(object):
             imgW = int(np.float(max_ratio * imgH))
             imgW = max(imgH * self.min_ratio, imgW)
 
-        transform = resizeNormalize((imgW, imgH))
+        transform = resizeNormalize((imgH, imgW))
         items = []
         for item in batchlist:
             img = transform(item[0])
             t, l = self.textconverter.encode(item[1])
-            print(img.shape, item[1], t, l)
+#            print(img.shape, item[1], t, l)
             items.append((img, t))
 
-#        return concat_examples(items, device, )
         return variable_sequence_convert(items, device)
 
 
@@ -133,22 +133,29 @@ class CRNNUpdater(training.StandardUpdater):
     def update_core(self):
         batch = self._iterators['main'].next()
         in_arrays = self.converter(batch, self.device)
+        xs, ts = in_arrays
 
-        print('batch', type(in_arrays[0]))
         optimizer = self._optimizers['main']
+        xp = optimizer.target.xp
         loss_func = self.loss_func or optimizer.target
 
-        if isinstance(in_arrays, tuple):
-            in_vars = tuple(Variable(x) for x in in_arrays)
-            in_arrays = in_vars
-        print(in_arrays)
-        print(type(in_arrays))
-        if isinstance(in_arrays, tuple):
-            optimizer.update(loss_func, *(*in_arrays, 0))
-        elif isinstance(in_arrays, dict):
-            optimizer.update(loss_func, **in_arrays)
-        else:
-            optimizer.update(loss_func, in_arrays)
+        x = Variable(np.asarray(xs)) # (64, 1, 32, 100)
+        y = optimizer.target(x) # (26, 64, 37)
+        padded_ts = np.zeros((len(ts), max([len(t) for t in ts])))
+        for index, item in enumerate(ts):
+            padded_ts[index, :item.shape[0]] = item
+
+        loss = loss_func([item for item in y],
+                         xp.asarray(padded_ts).astype(xp.int32),
+                         0,
+                         xp.full((len(ts),), 26, dtype=xp.int32),
+                         xp.asarray([len(t) for t in ts]).astype(xp.int32))
+
+        optimizer.target.cleargrads()
+        loss.backward()
+        loss.unchain_backward()
+        optimizer.update()
+        reporter.report({'loss': loss}, self._optimizers['main'].target)
 
 
 def variable_sequence_convert(batch, device):
@@ -179,8 +186,6 @@ def variable_sequence_convert(batch, device):
 
 def main():
     args = arg()
-#    if not os.path.isdir(args.out):
-#        os.system('mkdir {0}'.format(args.out))
 
     nc = 1
     nclass = len(args.alphabet) + 1
@@ -212,7 +217,7 @@ def main():
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), out=args.out)
 
     # Evaluate the model with the test dataset for each epoch
-    trainer.extend(extensions.Evaluator(test_iter, model, device=args.gpu))
+#    trainer.extend(extensions.Evaluator(test_iter, model, device=args.gpu))
 
     # Take a snapshot for each specified epoch
     frequency = args.epoch if args.frequency == -1 else max(1, args.frequency)
