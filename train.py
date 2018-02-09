@@ -99,9 +99,9 @@ class CRNNUpdater(training.StandardUpdater):
         xp = optimizer.target.xp
         loss_func = self.loss_func or optimizer.target
 
-        x = Variable(np.asarray(xs)) # (64, 1, 32, 100)
+        x = Variable(xp.asarray(xs, dtype=xp.float32)) # (64, 1, 32, 100)
         y = optimizer.target(x) # (26, 64, 37)
-        padded_ts = np.zeros((len(ts), max([len(t) for t in ts])))
+        padded_ts = xp.zeros((len(ts), max([len(t) for t in ts])))
         for index, item in enumerate(ts):
             padded_ts[index, :item.shape[0]] = item
 
@@ -162,9 +162,9 @@ class CRNN_Evaluator(extensions.Evaluator):
                 xp = model.xp
                 loss_func = self.loss_func
 
-                x = Variable(np.asarray(xs)) # (64, 1, 32, 100)
+                x = Variable(xp.asarray(xs, dtype=xp.float32)) # (64, 1, 32, 100)
                 y = model(x) # (26, 64, 37)
-                padded_ts = np.zeros((len(ts), max([len(t) for t in ts])))
+                padded_ts = xp.zeros((len(ts), max([len(t) for t in ts])))
                 for index, item in enumerate(ts):
                     padded_ts[index, :item.shape[0]] = item
 
