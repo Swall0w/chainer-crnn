@@ -90,66 +90,6 @@ class strLabelConverter(object):
             return texts
 
 
-class averager(object):
-    """Compute average for `torch.Variable` and `torch.Tensor`. """
-
-    def __init__(self):
-        self.reset()
-
-    def add(self, v):
-        if isinstance(v, Variable):
-            count = v.data.numel()
-            v = v.data.sum()
-        elif isinstance(v, torch.Tensor):
-            count = v.numel()
-            v = v.sum()
-
-        self.n_count += count
-        self.sum += v
-
-    def reset(self):
-        self.n_count = 0
-        self.sum = 0
-
-    def val(self):
-        res = 0
-        if self.n_count != 0:
-            res = self.sum / float(self.n_count)
-        return res
-
-
-def oneHot(v, v_length, nc):
-    batchSize = v_length.size(0)
-    maxLength = v_length.max()
-    v_onehot = torch.FloatTensor(batchSize, maxLength, nc).fill_(0)
-    acc = 0
-    for i in range(batchSize):
-        length = v_length[i]
-        label = v[acc:acc + length].view(-1, 1).long()
-        v_onehot[i, :length].scatter_(1, label, 1.0)
-        acc += length
-    return v_onehot
-
-
-def loadData(v, data):
-    v.data.resize_(data.size()).copy_(data)
-
-
-def prettyPrint(v):
-    print('Size {0}, Type: {1}'.format(str(v.size()), v.data.type()))
-    print('| Max: %f | Min: %f | Mean: %f' % (v.max().data[0], v.min().data[0],
-                                              v.mean().data[0]))
-
-
-def assureRatio(img):
-    """Ensure imgH <= imgW."""
-    b, c, h, w = img.size()
-    if h > w:
-        main = nn.UpsamplingBilinear2d(size=(h, h), scale_factor=None)
-        img = main(img)
-    return img
-
-
 class AlignConverter(object):
     def __init__(self, alphabet, imgH=32, imgW=100, keep_ratio=False, min_ratio=1):
         self.imgH = imgH
