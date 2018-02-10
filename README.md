@@ -1,5 +1,6 @@
 # Convolutional Recurrent Neural Network
 This repository implements the Convolutional Recurrent Neural Network(CRNN) in chainer.
+This repository is not implemented for GPU completely now.
 
 You can find [original implementation](https://github.com/bgshih/crnn)
 and [Pytorch implementation](https://github.com/meijieru/crnn.pytorch).
