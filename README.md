@@ -27,6 +27,8 @@ Then launch the demo by:
 ## Train
 I will write how to setup dataset and train model later.
 
+Dataset for training is [Synthetic Word Dataset](http://www.robots.ox.ac.uk/~vgg/data/text/)
+
 # Author
 * Swall0w
 
